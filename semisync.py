@@ -5,11 +5,11 @@ from types import FunctionType, MethodType
 
 class SharedData(object): pass
 
-def queue_function(fn, args, q):
-  q.put([fn(*args), fn, args])
+def queue_function(fn, args, kwargs, q):
+  q.put([fn(*args, **kwargs), fn, args, kwargs])
 
-def start_process(fn, args, q, processes):
-   p = Process(target=queue_function, args=(fn, args, q))
+def start_process(fn, args, kwargs, q, processes):
+   p = Process(target=queue_function, args=(fn, args, kwargs, q))
    p.start()
 
    processes.append(p)
@@ -65,14 +65,14 @@ def semisync(tree=None, on_completed=None, shared_data=None):
 
   # start a new process for each object that has no dependencies
   for fn in independent_fns(tree):
-    start_process(fn, tree[fn]['args'], q, processes)
+    start_process(fn, tree[fn].get('args', tuple()), tree[fn].get('kwargs', dict()), q, processes)
 
   # read from queue as items are added
   i = 0
   while i < len(processes):
 
     # update note with new data
-    result, fn, args = q.get()
+    result, fn, args, kwargs = q.get()
     new_data = extract_shared_data(result)
     merge(new_data, shared_data)
 
@@ -89,13 +89,20 @@ def semisync(tree=None, on_completed=None, shared_data=None):
       # if any objects now have zero dependencies
       # start an async process for them
       if not depends_on[other_fn]:
-        start_process(other_fn, tree[other_fn]['args'], q, processes)
+        start_process(other_fn, tree[other_fn]['args'], tree[other_fn].get('kwargs', {}), q, processes)
 
     i += 1
 
   cleanup(processes, q)
 
   return dict(results), shared_data.__dict__
+
+# wrap method in fn to call semisynchronously
+def semisync_method(method_name):
+  def method(obj, *args, **kwargs):
+    return getattr(obj, method_name)(*args, **kwargs)
+  return method 
+
 
 if __name__ == '__main__':
 
@@ -116,15 +123,12 @@ if __name__ == '__main__':
     return shared_data
 
   class Class:
-    def method(self, shared_data):
+    def method(self, shared_data, printout=False):
       shared_data.text = 'Hello World!'
+      if printout: print shared_data.text
       return shared_data
 
-  c = Class()
-
-  # wrap method in fn to call semisynchronously
-  def method(obj, shared_data):
-    return obj.method(shared_data)
+  method = semisync_method('method')
 
   def on_completed(result, fn, args):
     print fn.__name__
@@ -132,7 +136,7 @@ if __name__ == '__main__':
   tree = {add: {'args': (2, shared)},
           subtract: {'args': (3, shared)},
           multiply: {'dependencies': set([add]), 'args': (5, shared)},
-          method: {'args': (c, shared)}}
+          method: {'args': (Class(), shared), 'kwargs': {'printout': True}}}
 
   results, shared_data = semisync(tree=tree, on_completed=on_completed, shared_data=shared)
   print shared_data
