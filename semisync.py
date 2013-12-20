@@ -98,9 +98,9 @@ def semisync(tree=None, on_completed=None, shared_data=None):
   return dict(results), shared_data.__dict__
 
 # wrap method in fn to call semisynchronously
-def semisync_method(method_name):
-  def method(obj, *args, **kwargs):
-    return getattr(obj, method_name)(*args, **kwargs)
+def semisync_method(c, method_name):
+  def method(*args, **kwargs):
+    getattr(c, method_name)(*args, **kwargs)
   return method 
 
 
@@ -128,7 +128,9 @@ if __name__ == '__main__':
       if printout: print shared_data.text
       return shared_data
 
-  method = semisync_method('method')
+  c = Class()
+
+  method = semisync_method(c, 'method')
 
   def on_completed(result, fn, args):
     print fn.__name__
@@ -136,7 +138,7 @@ if __name__ == '__main__':
   tree = {add: {'args': (2, shared)},
           subtract: {'args': (3, shared)},
           multiply: {'dependencies': set([add]), 'args': (5, shared)},
-          method: {'args': (Class(), shared), 'kwargs': {'printout': True}}}
+          method: {'args': (shared,), 'kwargs': {'printout': True}}}
 
   results, shared_data = semisync(tree=tree, on_completed=on_completed, shared_data=shared)
   print shared_data
