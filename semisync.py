@@ -24,16 +24,17 @@ def cleanup(processes, q):
 def dependency_trees(tree):
   depends_on = defaultdict(set)
   needed_for = defaultdict(set)
+  tree = defaultdict(lambda : defaultdict(tuple), tree)
 
   for fn in tree.keys():
-    for dependency in tree[fn]['dependencies']:
+    for dependency in tree[fn].get('dependencies', []):
       depends_on[fn].add(dependency)
       needed_for[dependency].add(fn)
 
   return depends_on, needed_for
 
 def independent_fns(tree):
-  return set([key for key in tree.keys() if not tree[key]['dependencies']])
+  return set([key for key in tree.keys() if not tree[key].get('dependencies', False)])
 
 def extract_shared_data(data):
   if isinstance(data, tuple):
@@ -48,7 +49,7 @@ def merge(new, master):
     for k, v in new.__dict__.items():
       setattr(master, k, v)
 
-def resolve_dependencies(tree=None, on_completed=None, shared_data=None):
+def semisync(tree=None, on_completed=None, shared_data=None):
   # applies fn(*args) for each obj in object, ensuring
   # that the proper attributes of shared_data exist before calling a method
 
@@ -119,20 +120,19 @@ if __name__ == '__main__':
       shared_data.text = 'Hello World!'
       return shared_data
 
+  c = Class()
+
   # wrap method in fn to call semisynchronously
   def method(obj, shared_data):
-    obj.method(shared_data)
-    return shared_data
-
-  c = Class()
+    return obj.method(shared_data)
 
   def on_completed(result, fn, args):
     print fn.__name__
 
-  tree = {add: {'dependencies': set(), 'args': (2, shared)},
-          subtract: {'dependencies': set(), 'args': (3, shared)},
+  tree = {add: {'args': (2, shared)},
+          subtract: {'args': (3, shared)},
           multiply: {'dependencies': set([add]), 'args': (5, shared)},
-          method: {'dependencies': set(), 'args': (c, shared)}}
+          method: {'args': (c, shared)}}
 
-  results, shared_data = resolve_dependencies(tree=tree, on_completed=on_completed, shared_data=shared)
+  results, shared_data = semisync(tree=tree, on_completed=on_completed, shared_data=shared)
   print shared_data
