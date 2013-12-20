@@ -94,7 +94,7 @@ def resolve_dependencies(tree=None, on_completed=None, shared_data=None):
 
   cleanup(processes, q)
 
-  return results
+  return dict(results), shared_data.__dict__
 
 if __name__ == '__main__':
 
@@ -119,7 +119,7 @@ if __name__ == '__main__':
       shared_data.text = 'Hello World!'
       return shared_data
 
-  # wrap method in fn to call
+  # wrap method in fn to call semisynchronously
   def method(obj, shared_data):
     obj.method(shared_data)
     return shared_data
@@ -127,11 +127,12 @@ if __name__ == '__main__':
   c = Class()
 
   def on_completed(result, fn, args):
-    print fn.__name__ + str(args) + ' = ' + str(result.__dict__)
+    print fn.__name__
 
   tree = {add: {'dependencies': set(), 'args': (2, shared)},
           subtract: {'dependencies': set(), 'args': (3, shared)},
           multiply: {'dependencies': set([add]), 'args': (5, shared)},
           method: {'dependencies': set(), 'args': (c, shared)}}
 
-  results = resolve_dependencies(tree=tree, on_completed=on_completed, shared_data=shared)
+  results, shared_data = resolve_dependencies(tree=tree, on_completed=on_completed, shared_data=shared)
+  print shared_data
