@@ -48,7 +48,11 @@ def extract_data_type(data, datatype):
 def merge(new, master):
   if isinstance(new, SharedData):
     for k, v in new.__dict__.items():
-      setattr(master, k, v)
+      try:
+        current = getattr(master, k)
+        setattr(master, k, current + v)
+      except:
+        setattr(master, k, v)
 
 def exec_semisync():
   # applies fn(*args) for each obj in object, ensuring
@@ -70,6 +74,7 @@ def exec_semisync():
   for fn in independent_fns(tree):
     fn_map[id(fn)] = fn
     for i in range(len(tree[fn]['args'])):
+      print "Before calling function", semisync.shared.__dict__
       start_process(fn, tree[fn]['args'][i], tree[fn]['kwargs'][i])
 
   # read from queue as items are added
@@ -78,6 +83,7 @@ def exec_semisync():
 
     # update note with new data
     result, fn_id = semisync.q.get()
+    print "After function return", semisync.shared.__dict__
 
     # execute callback function
     fn = fn_map[id(fn)]
@@ -86,6 +92,8 @@ def exec_semisync():
 
     new_data = extract_data_type(result, SharedData)
     merge(new_data, shared)
+
+    print "After data merge", semisync.shared.__dict__
 
     results[fn] += [result]
 
@@ -156,12 +164,16 @@ if __name__ == '__main__':
 
   @semisync(callback=process)
   def add(x):
+    print "In function before modification", semisync.shared.__dict__
     shared.sum += x
+    print "In function after modification", semisync.shared.__dict__
     return shared
 
   @semisync(callback=process, dependencies=set([add]))
   def multiply(x):
+    print "In function before modification", semisync.shared.__dict__
     shared.product = shared.sum * x
+    print "In function after modification", semisync.shared.__dict__
     return shared
 
 
