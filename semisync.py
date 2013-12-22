@@ -48,11 +48,14 @@ def extract_data_type(data, datatype):
 def merge(new, master):
   if isinstance(new, SharedData):
     for k, v in new.__dict__.items():
-      try:
-        current = getattr(master, k)
-        setattr(master, k, current + v)
-      except:
-        setattr(master, k, v)
+
+      # Should default behavior be to overwrite?
+      # try:
+      #   current = getattr(master, k)
+      #   setattr(master, k, current + v)
+      # except:
+      
+      setattr(master, k, v)
 
 def exec_semisync():
   # applies fn(*args) for each obj in object, ensuring
