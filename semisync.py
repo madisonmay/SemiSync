@@ -15,86 +15,18 @@ def start_process(fn, args, kwargs):
 
 def cleanup():
   # ensure no processes remain in a zombie state
-  for p in semisync.processes:
+  while semisync.processes:
+    p = semisync.processes.pop()
     p.join()
 
-  semisync.q.close()
-
-def dependency_trees(tree):
-  depends_on = defaultdict(set)
-  needed_for = defaultdict(set)
-  tree = defaultdict(lambda : defaultdict(tuple), tree)
-
+def generate_dependency_trees(tree):
   for fn in tree.keys():
     for dependency in tree[fn].get('dependencies', []):
-      depends_on[fn].add(dependency)
-      needed_for[dependency].add(fn)
-
-  return depends_on, needed_for
+      semisync.depends_on[fn].add(dependency)
+      semisync.needed_for[dependency].add(fn)
 
 def independent_fns(tree):
   return set([key for key in tree.keys() if not tree[key].get('dependencies', False)])
-
-def exec_semisync():
-  # applies fn(*args) for each obj in object, ensuring
-  # that the proper attributes of shared_data exist before calling a method
-
-  # because some functions depend on the results of other functions, this is 
-  # a semi-synchronous operation -- certain methods must be guaranteed to
-  # terminate before others 
-
-  # aliasing
-  shared = semisync.shared
-  tree, q, processes = semisync.tree, semisync.q, semisync.processes
-
-  results = defaultdict(list)
-  depends_on, needed_for = dependency_trees(tree)
-  fn_map = {}
-
-  # functions cannot be added to queue
-  # work around this by passing an id instead
-  for fn in tree.keys():
-    fn_map[id(fn)] = fn
-
-  # start a new process for each object that has no dependencies
-  for fn in independent_fns(tree):
-    for i in range(len(tree[fn]['args'])):
-      start_process(fn, tree[fn]['args'][i], tree[fn]['kwargs'][i])
-
-  # read from queue as items are added
-  i = 0
-  while i < len(processes):
-
-    # update note with new data
-    result, fn_id = semisync.q.get()
-
-    # execute callback function
-    fn = fn_map[fn_id]
-    if tree[fn]['callback']:
-      tree[fn]['callback'](result)
-
-    results[fn] += [result]
-
-    # iterate through objects that depended on the completed obj
-    # and remove the completed object from the list of their dependencies
-
-    for other_fn in needed_for[fn]:
-      depends_on[other_fn].remove(fn)
-
-      # if any objects now have zero dependencies
-      # start an async process for them
-      if not depends_on[other_fn]:
-        for j in range(len(tree[other_fn]['args'])):
-          start_process(other_fn, tree[other_fn]['args'][j], tree[other_fn]['kwargs'][j])
-
-    needed_for[fn] = set()
-
-
-    i += 1
-
-  cleanup()
-
-  return dict(results)
 
 # wrap method in fn to call semisynchronously
 def semisync_method(c, method_name):
@@ -112,7 +44,11 @@ class semisync:
   q = Queue()
   processes = []
   map = {}
-  shared = Manager().Namespace()
+  manager = Manager()
+  depends_on = defaultdict(set)
+  needed_for = defaultdict(set)
+  completed = set()
+  fn_map = {}
 
   def __init__(self, callback=False, dependencies=set()):
     self.callback = callback
@@ -126,23 +62,82 @@ class semisync:
       semisync.tree[fn] = merge_dicts(fn_call, semisync.tree.get(fn, {}))
     semisync.map[semisync_fn] = fn
     return semisync_fn
-                
 
+  @classmethod
+  def begin(self):
+    # applies fn(*args) for each obj in object, ensuring
+    # that the proper attributes of shared_data exist before calling a method
+
+    # because some functions depend on the results of other functions, this is 
+    # a semi-synchronous operation -- certain methods must be guaranteed to
+    # terminate before others 
+
+    # aliasing
+    shared, completed = semisync.manager, semisync.completed
+    tree, q, processes = semisync.tree, semisync.q, semisync.processes
+    depends_on, needed_for = semisync.depends_on, semisync.needed_for
+    fn_map = semisync.fn_map
+
+    generate_dependency_trees(tree)
+
+    # functions cannot be added to queue
+    # work around this by passing an id instead
+    for fn in tree.keys():
+      fn_map[id(fn)] = fn
+
+    # start a new process for each object that has no dependencies
+    for fn in independent_fns(tree):
+      for i in range(len(tree[fn]['args'])):
+        args, kwargs = tree[fn]['args'].pop(i), tree[fn]['kwargs'].pop(i)
+        start_process(fn, args, kwargs)
+
+
+    # read from queue as items are added
+    i = 0
+    while i < len(processes):
+
+      # update note with new data
+      result, fn_id = semisync.q.get()
+
+      # execute callback function
+      fn = fn_map[fn_id]
+      if tree[fn]['callback']:
+        tree[fn]['callback'](result)
+
+      # iterate through objects that depended on the completed obj
+      # and remove the completed object from the list of their dependencies
+
+      for other_fn in needed_for[fn]:
+        depends_on[other_fn].remove(fn)
+
+        # if any objects now have zero dependencies
+        # start an async process for them
+        if not depends_on[other_fn]:
+          for j in range(len(tree[other_fn]['args'])):
+            args, kwargs = tree[other_fn]['args'].pop(j), tree[other_fn]['kwargs'].pop(j)
+            start_process(other_fn, args, kwargs)
+
+      needed_for[fn] = set()
+
+
+      i += 1
+
+    cleanup()
 
 if __name__ == '__main__':
 
   #shared data
-  shared = semisync.shared
+  shared = semisync.manager.Namespace()
   shared.sum = 0
 
-  def process(result):
-    print shared
+  def process(result, fn):
+    print fn.__name__, shared
 
   @semisync(callback=process)
   def add(x):
     shared.sum += x
 
-  @semisync(callback=process, dependencies=set([add]))
+  @semisync(callback=process)
   def subtract(x):
     shared.sum -= x
 
@@ -150,11 +145,15 @@ if __name__ == '__main__':
   def multiply(x):
     shared.product = shared.sum * x
 
-
+  @semisync(callback=process, dependencies=set([subtract]))
+  def divide(x):
+    shared.quotient = shared.sum / float(x)
 
   add(1)
   subtract(2)
   multiply(3)
+  divide(4)
+  semisync.begin()
 
   # subtract(2, shared)
 
@@ -167,11 +166,8 @@ if __name__ == '__main__':
   #     return shared_data
 
   # method = semisync_method(Class(), 'method')
-
-
-  results = exec_semisync()
 """
 Notes:
-Make semisync decorator do the work of initialization and termination
+Make semisync decorator do the work of initialization
 Add check for irresolvable dependencies
 """
