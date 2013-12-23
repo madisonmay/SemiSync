@@ -1,10 +1,8 @@
-from multiprocessing import Queue, Process
+from multiprocessing import Queue, Process, Manager
 from collections import defaultdict
 from copy import deepcopy
 from types import FunctionType, MethodType
 from pprint import pprint
-
-class SharedData(object): pass
 
 def queue_function(fn, args, kwargs):
   semisync.q.put([fn(*args, **kwargs), id(fn)])
@@ -37,26 +35,6 @@ def dependency_trees(tree):
 def independent_fns(tree):
   return set([key for key in tree.keys() if not tree[key].get('dependencies', False)])
 
-def extract_data_type(data, datatype):
-  if isinstance(data, tuple):
-    for datum in data:
-      if isinstance(datum, datatype):
-        return datum
-  if isinstance(data, datatype):
-    return data
-
-def merge(new, master):
-  if isinstance(new, SharedData):
-    for k, v in new.__dict__.items():
-
-      # Should default behavior be to overwrite?
-      # try:
-      #   current = getattr(master, k)
-      #   setattr(master, k, current + v)
-      # except:
-      
-      setattr(master, k, v)
-
 def exec_semisync():
   # applies fn(*args) for each obj in object, ensuring
   # that the proper attributes of shared_data exist before calling a method
@@ -73,11 +51,14 @@ def exec_semisync():
   depends_on, needed_for = dependency_trees(tree)
   fn_map = {}
 
+  # functions cannot be added to queue
+  # work around this by passing an id instead
+  for fn in tree.keys():
+    fn_map[id(fn)] = fn
+
   # start a new process for each object that has no dependencies
   for fn in independent_fns(tree):
-    fn_map[id(fn)] = fn
     for i in range(len(tree[fn]['args'])):
-      print "Before calling function", semisync.shared.__dict__
       start_process(fn, tree[fn]['args'][i], tree[fn]['kwargs'][i])
 
   # read from queue as items are added
@@ -86,17 +67,11 @@ def exec_semisync():
 
     # update note with new data
     result, fn_id = semisync.q.get()
-    print "After function return", semisync.shared.__dict__
 
     # execute callback function
-    fn = fn_map[id(fn)]
+    fn = fn_map[fn_id]
     if tree[fn]['callback']:
       tree[fn]['callback'](result)
-
-    new_data = extract_data_type(result, SharedData)
-    merge(new_data, shared)
-
-    print "After data merge", semisync.shared.__dict__
 
     results[fn] += [result]
 
@@ -109,7 +84,6 @@ def exec_semisync():
       # if any objects now have zero dependencies
       # start an async process for them
       if not depends_on[other_fn]:
-        fn_map[id(other_fn)] = other_fn
         for j in range(len(tree[other_fn]['args'])):
           start_process(other_fn, tree[other_fn]['args'][j], tree[other_fn]['kwargs'][j])
 
@@ -138,7 +112,7 @@ class semisync:
   q = Queue()
   processes = []
   map = {}
-  shared = SharedData()
+  shared = Manager().Namespace()
 
   def __init__(self, callback=False, dependencies=set()):
     self.callback = callback
@@ -162,33 +136,26 @@ if __name__ == '__main__':
   shared.sum = 0
 
   def process(result):
-    pass
-    # print result.__dict__
+    print shared
 
   @semisync(callback=process)
   def add(x):
-    print "In function before modification", semisync.shared.__dict__
     shared.sum += x
-    print "In function after modification", semisync.shared.__dict__
-    return shared
 
   @semisync(callback=process, dependencies=set([add]))
+  def subtract(x):
+    shared.sum -= x
+
+  @semisync(callback=process, dependencies=set([subtract]))
   def multiply(x):
-    print "In function before modification", semisync.shared.__dict__
     shared.product = shared.sum * x
-    print "In function after modification", semisync.shared.__dict__
-    return shared
 
 
-  # @semisync()
-  # def subtract(x, shared_data):
-  #   shared_data.sums -= x
-  #   return shared_data
 
   add(1)
-  add(2)
+  subtract(2)
   multiply(3)
-  multiply(4)
+
   # subtract(2, shared)
 
 
@@ -203,9 +170,8 @@ if __name__ == '__main__':
 
 
   results = exec_semisync()
-  print shared.__dict__
 """
 Notes:
 Make semisync decorator do the work of initialization and termination
-Eliminate need to return shared data
+Add check for irresolvable dependencies
 """
