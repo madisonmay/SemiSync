@@ -25,8 +25,16 @@ def generate_dependency_trees(tree):
       semisync.depends_on[fn].add(dependency)
       semisync.needed_for[dependency].add(fn)
 
+def dependencies(fn):
+  tree, completed = semisync.tree, semisync.completed
+  return [d for d in tree[fn]['dependencies'] if d not in completed]
+
 def independent_fns(tree):
-  return set([key for key in tree.keys() if not tree[key].get('dependencies', False)])
+  result = []
+  for key in tree.keys():
+    if not dependencies(key):
+      result.append(key)
+  return result
 
 # wrap method in fn to call semisynchronously
 def semisync_method(c, method_name):
@@ -88,7 +96,7 @@ class semisync:
     # start a new process for each object that has no dependencies
     for fn in independent_fns(tree):
       for i in range(len(tree[fn]['args'])):
-        args, kwargs = tree[fn]['args'].pop(i), tree[fn]['kwargs'].pop(i)
+        args, kwargs = tree[fn]['args'].pop(), tree[fn]['kwargs'].pop()
         start_process(fn, args, kwargs)
 
 
@@ -101,6 +109,8 @@ class semisync:
 
       # execute callback function
       fn = fn_map[fn_id]
+      completed.add(fn)
+
       if tree[fn]['callback']:
         tree[fn]['callback'](result)
 
@@ -114,10 +124,8 @@ class semisync:
         # start an async process for them
         if not depends_on[other_fn]:
           for j in range(len(tree[other_fn]['args'])):
-            args, kwargs = tree[other_fn]['args'].pop(j), tree[other_fn]['kwargs'].pop(j)
+            args, kwargs = tree[other_fn]['args'].pop(), tree[other_fn]['kwargs'].pop()
             start_process(other_fn, args, kwargs)
-
-      needed_for[fn] = set()
 
 
       i += 1
@@ -130,8 +138,8 @@ if __name__ == '__main__':
   shared = semisync.manager.Namespace()
   shared.sum = 0
 
-  def process(result, fn):
-    print fn.__name__, shared
+  def process(result):
+    print shared
 
   @semisync(callback=process)
   def add(x):
@@ -150,9 +158,10 @@ if __name__ == '__main__':
     shared.quotient = shared.sum / float(x)
 
   add(1)
-  subtract(2)
-  multiply(3)
-  divide(4)
+  add(2)
+  semisync.begin()
+  subtract(3)
+  multiply(1)
   semisync.begin()
 
   # subtract(2, shared)
