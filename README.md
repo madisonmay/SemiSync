@@ -64,7 +64,7 @@ To repeat the process, simply clear the cache of function calls by using semisyn
       semisync.clear()
 
 
-In this simple example, moving from synchronous to semi-synchronous execution cuts the average execution time from 1.00 seconds to .700 seconds.  
+In this simple example, moving from synchronous to semi-synchronous execution cuts the average execution time from 1.00 seconds to .700 seconds.  And although the example used is trivial, dependency trees can be arbitrarily complex.
 
 Additional Notes 
 -----------------
