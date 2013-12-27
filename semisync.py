@@ -1,8 +1,6 @@
 from multiprocessing import Queue, Process, Manager
 from collections import defaultdict
-from copy import deepcopy
-from types import FunctionType, MethodType
-from pprint import pprint
+from time import sleep
 
 def queue_function(fn, args, kwargs):
   semisync.q.put([fn(*args, **kwargs), id(fn)])
@@ -57,6 +55,7 @@ class semisync:
   needed_for = defaultdict(set)
   completed = set()
   fn_map = {}
+  lock = manager.Lock()
 
   def __init__(self, callback=False, dependencies=set()):
     self.callback = callback
@@ -68,8 +67,20 @@ class semisync:
       fn_call = {'callback': self.callback, 'args': [args], 'kwargs': [kwargs],
                  'dependencies': set([semisync.map[d] for d in self.dependencies])}
       semisync.tree[fn] = merge_dicts(fn_call, semisync.tree.get(fn, {}))
+
+    # functions cannot be added to queue
+    # work around this by passing an id inst
+    semisync.fn_map[id(fn)] = fn
+
+    #mapping from decorated function to undecorated function
     semisync.map[semisync_fn] = fn
     return semisync_fn
+
+  @classmethod
+  def clear(self):
+    semisync.completed = set()
+    semisync.depends_on = defaultdict(set)
+    semisync.needed_for = defaultdict(set)
 
   @classmethod
   def begin(self):
@@ -81,17 +92,12 @@ class semisync:
     # terminate before others 
 
     # aliasing
-    shared, completed = semisync.manager, semisync.completed
+    completed = semisync.completed
     tree, q, processes = semisync.tree, semisync.q, semisync.processes
     depends_on, needed_for = semisync.depends_on, semisync.needed_for
     fn_map = semisync.fn_map
 
     generate_dependency_trees(tree)
-
-    # functions cannot be added to queue
-    # work around this by passing an id instead
-    for fn in tree.keys():
-      fn_map[id(fn)] = fn
 
     # start a new process for each object that has no dependencies
     for fn in independent_fns(tree):
@@ -106,13 +112,12 @@ class semisync:
 
       # update note with new data
       result, fn_id = semisync.q.get()
-
-      # execute callback function
       fn = fn_map[fn_id]
       completed.add(fn)
 
+      #execute callback
       if tree[fn]['callback']:
-        tree[fn]['callback'](result)
+        tree[fn]['callback'](*result)
 
       # iterate through objects that depended on the completed obj
       # and remove the completed object from the list of their dependencies
@@ -133,48 +138,40 @@ class semisync:
     cleanup()
 
 if __name__ == '__main__':
+  from random import random, randint
+  from time import sleep
 
   #shared data
   shared = semisync.manager.Namespace()
-  shared.sum = 0
 
-  def process(result):
-    print shared
+  def output(field, value):
+    print field + ": $" + str(value)
 
-  @semisync(callback=process)
-  def add(x):
-    shared.sum += x
+  @semisync(callback=output)
+  def revenue():
+    # simulated api call
+    sleep(random())
+    shared.revenue = randint(1, 1000)
+    return "Revenue", shared.revenue
 
-  @semisync(callback=process)
-  def subtract(x):
-    shared.sum -= x
+  @semisync(callback=output)
+  def expenses():
+    # simulated api call
+    sleep(random())
+    shared.expenses = randint(1, 500)
+    return "Expenses", shared.expenses
 
-  @semisync(callback=process, dependencies=set([subtract]))
-  def multiply(x):
-    shared.product = shared.sum * x
+  @semisync(callback=output, dependencies=[revenue, expenses])
+  def profit():
+    shared.profit = shared.revenue - shared.expenses
+    return "Profit", shared.profit
 
-  @semisync(callback=process, dependencies=set([subtract]))
-  def divide(x):
-    shared.quotient = shared.sum / float(x)
-
-  add(1)
-  add(2)
+  revenue()
+  expenses()
+  profit()
   semisync.begin()
-  subtract(3)
-  multiply(1)
-  semisync.begin()
-
-  # subtract(2, shared)
 
 
-  # class Class:
-  #   @semisync
-  #   def method(self, shared_data, printout=False):
-  #     shared_data.text = 'Hello World!'
-  #     if printout: print shared_data.text
-  #     return shared_data
-
-  # method = semisync_method(Class(), 'method')
 """
 Notes:
 Make semisync decorator do the work of initialization
