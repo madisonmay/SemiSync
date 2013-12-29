@@ -18,7 +18,7 @@ Install via pip
     
 or via setup.py
 
-    python setup.py install
+    sudo python setup.py install
 
 Let's See Some Code
 -------------------
