@@ -10,6 +10,16 @@ What is semisync.py?
 
 Some problems are best solved synchronously, while others are a better fit for the asynchronous paradigm.  Most problems fall somewhere in between -- they could benefit from asynchronous execution, but require some events to happen in a certain order.  This module seeks to make blending the two paradigms a bit easier by introducing a concept of dependencies.    If one process must not run until another process has completed, that process is said to be "dependent" on the second process.  Semisync.py was built using python's multiprocessing library and a liberal dose of decorator syntax.
 
+Installation
+------------
+Install via pip
+
+    sudo pip install semisync
+    
+or via setup.py
+
+    python setup.py install
+
 Let's See Some Code
 -------------------
     from semisync import semisync
